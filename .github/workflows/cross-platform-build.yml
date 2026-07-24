@@ -1,0 +1,129 @@
+name: Cross-platform build
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish the completed installers as a public prerelease
+        required: true
+        default: false
+        type: boolean
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cross-platform-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            artifact: lameta-windows-x64
+            command: yarn electron-builder --win nsis --x64 --publish never
+          - name: macOS universal
+            os: macos-latest
+            artifact: lameta-macos-universal
+            command: yarn electron-builder --mac dmg zip --universal --publish never -c.mac.notarize=false
+          - name: Linux x64
+            os: ubuntu-latest
+            artifact: lameta-linux-x64
+            command: yarn electron-builder --linux AppImage deb --x64 --publish never
+
+    env:
+      # These are artifact builds, not signed releases.
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Node.js and Yarn from package.json
+        uses: volta-cli/action@v4
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile --network-timeout 1000000
+
+      - name: Build application
+        run: yarn fullbuild
+
+      - name: Package application
+        run: ${{ matrix.command }}
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-${{ github.run_number }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            release/*.AppImage
+            release/*.blockmap
+            release/*.deb
+            release/*.dmg
+            release/*.exe
+            release/*.zip
+
+  release:
+    name: Publish prerelease
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download installers from this workflow run
+        uses: actions/download-artifact@v4
+        with:
+          pattern: lameta-*-${{ github.run_number }}
+          path: release-assets
+          merge-multiple: true
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          find release-assets -type f -name '*.blockmap' -delete
+          cd release-assets
+          find . -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' -print0 |
+            sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+
+      - name: Publish public prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          tag="v${version}"
+          notes="Unsigned test builds for Windows x64, macOS universal (Intel and Apple Silicon), and Linux x64. See SHA256SUMS.txt for checksums."
+
+          mapfile -d '' assets < <(find release-assets -maxdepth 1 -type f -print0)
+
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$tag\") | .id")
+            gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets" --jq '.[].id' |
+              while read -r asset_id; do
+                gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
+              done
+            gh release upload "$tag" "${assets[@]}" --repo "$GITHUB_REPOSITORY"
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --title "$version" --notes "$notes" \
+              --prerelease --draft=false
+          else
+            gh release create "$tag" "${assets[@]}" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --title "$version" --notes "$notes" \
+              --prerelease
+          fi

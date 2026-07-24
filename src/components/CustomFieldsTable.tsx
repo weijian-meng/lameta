@@ -12,6 +12,7 @@ import { t } from "@lingui/macro";
 import { i18n } from "../other/localization";
 import { FieldLabel } from "./FieldLabel";
 import { EncounteredVocabularyRegistry } from "../model/Project/EncounteredVocabularyRegistry";
+import { css } from "@emotion/react";
 
 export interface IProps {
   file: File;
@@ -153,13 +154,26 @@ class CustomFieldsTable extends React.Component<IProps> {
     //console.log(`Rendering Custom fields of ${this.props.folder.displayName}`);
     //const customFields = this.getCustomFields();
 
+    // React Table treats width as a flex weight. Size the field-name column
+    // from the longest name gathered for this file type, while keeping enough
+    // room for values and avoiding an excessively wide name column.
+    const longestFieldNameLength = this.fieldsForRows.reduce(
+      (longest, field) =>
+        Math.max(longest, field.definition.englishLabel.length),
+      0
+    );
+    const fieldNameColumnWidth = Math.min(
+      240,
+      Math.max(120, longestFieldNameLength * 7 + 24)
+    );
+
     const customFieldTableColumns = [
       {
         id: "name",
         Header: this.props.firstColumnHeaderText
           ? this.props.firstColumnHeaderText
           : t`Field`,
-        maxWidth: 150,
+        width: fieldNameColumnWidth,
         Cell: (cellInfo: any) => {
           const field = cellInfo.original as Field;
           return (
@@ -176,6 +190,7 @@ class CustomFieldsTable extends React.Component<IProps> {
       {
         id: "value",
         Header: t`Value`,
+        width: 200,
         Cell: (cellInfo: any) => {
           const field = cellInfo.original as Field;
           return (
@@ -207,10 +222,17 @@ class CustomFieldsTable extends React.Component<IProps> {
       <div className="customFieldsBlock">
         <FieldLabel fieldDef={customFieldsDef} />
         <ReactTable
+          css={css`
+            .rt-tbody {
+              max-height: 40em;
+              overflow-y: auto;
+            }
+          `}
           className="customFieldsTable field-value-border"
           noDataText=""
           minRows={1}
           showPagination={false}
+          pageSize={this.fieldsForRows.length}
           data={this.fieldsForRows}
           columns={customFieldTableColumns}
           //minRows={0} // don't show empty rows/>
