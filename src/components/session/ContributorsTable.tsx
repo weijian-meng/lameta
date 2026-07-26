@@ -22,8 +22,42 @@ interface IState {
   unused: number;
 }
 
+const CommentCell = (props: {
+  value: string;
+  onChange: (value: string) => void;
+}) => {
+  const shouldHighlight = useHasSearchMatch(props.value);
+  const { searchTerm } = React.useContext(SearchContext);
+
+  return (
+    <div
+      data-testid="contributor-comment-cell"
+      // Always include the attribute for easier E2E assertions
+      data-has-highlight={shouldHighlight ? "true" : "false"}
+      css={
+        shouldHighlight
+          ? css`
+              background: ${searchHighlight};
+            `
+          : undefined
+      }
+    >
+      <textarea
+        data-testid="contributor-comment-textarea"
+        onChange={(event) => props.onChange(event.target.value)}
+        value={props.value}
+      />
+      {/* lightweight inline highlight preview to give a stable element for tests */}
+      {shouldHighlight && (
+        <div data-testid="contributor-comment-inline-preview">
+          {highlightMatches(props.value, searchTerm)}
+        </div>
+      )}
+    </div>
+  );
+};
+
 class ContributorsTable extends React.Component<IProps> {
-  static contextType = SearchContext;
   constructor(props: IProps) {
     super(props);
   }
@@ -78,41 +112,6 @@ class ContributorsTable extends React.Component<IProps> {
     const contribution = this.props.file.contributions[cellInfo.index];
     const fieldOfThisColumn: keyof Contribution = cellInfo.column.id;
     const cellValue = (contribution[fieldOfThisColumn] as any) || "";
-    const CommentCell: React.FC<{
-      value: string;
-      onChange: (v: string) => void;
-    }> = ({ value, onChange }) => {
-      const shouldHighlight = useHasSearchMatch(value);
-      const { searchTerm } = (ContributorsTable as any).contextType
-        ? (this.context as any)
-        : { searchTerm: "" };
-      return (
-        <div
-          data-testid="contributor-comment-cell"
-          // Always include the attribute for easier E2E assertions
-          data-has-highlight={shouldHighlight ? "true" : "false"}
-          css={
-            shouldHighlight
-              ? css`
-                  background: ${searchHighlight};
-                `
-              : undefined
-          }
-        >
-          <textarea
-            data-testid="contributor-comment-textarea"
-            onChange={(e) => onChange(e.target.value)}
-            value={value}
-          />
-          {/* lightweight inline highlight preview to give a stable element for tests */}
-          {shouldHighlight && (
-            <div data-testid="contributor-comment-inline-preview">
-              {highlightMatches(value, searchTerm)}
-            </div>
-          )}
-        </div>
-      );
-    };
 
     return (
       <CommentCell
