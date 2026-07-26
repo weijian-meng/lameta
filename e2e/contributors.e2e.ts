@@ -59,4 +59,21 @@ test.describe("FileList", () => {
     await page.keyboard.press(arrowDownKey);
     await page.getByRole("option", { name: name }).click();
   });
+
+  test("contributor comments keep focus while typing", async () => {
+    await project.goToSessions();
+    await project.addSession();
+    await project.goToContributorsOfThisSession();
+
+    const comment = "Comment 123/测试";
+    const textarea = page
+      .getByTestId("contributor-comment-textarea")
+      .first();
+
+    await textarea.click();
+    await textarea.pressSequentially(comment);
+
+    await expect(textarea).toBeFocused();
+    await expect(textarea).toHaveValue(comment);
+  });
 });
