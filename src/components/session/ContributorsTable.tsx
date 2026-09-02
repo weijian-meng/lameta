@@ -22,11 +22,45 @@ interface IState {
   unused: number;
 }
 
-const CommentCell = (props: {
+export const CommentCell = (props: {
   value: string;
-  onChange: (value: string) => void;
+  onCommit: (value: string) => void;
 }) => {
-  const shouldHighlight = useHasSearchMatch(props.value);
+  const [draft, setDraft] = React.useState(props.value);
+  const draftRef = React.useRef(props.value);
+  const valueRef = React.useRef(props.value);
+  const onCommitRef = React.useRef(props.onCommit);
+
+  valueRef.current = props.value;
+  onCommitRef.current = props.onCommit;
+
+  React.useEffect(() => {
+    draftRef.current = props.value;
+    setDraft(props.value);
+  }, [props.value]);
+
+  const commit = React.useCallback(() => {
+    const nextValue = draftRef.current;
+    if (nextValue !== valueRef.current) {
+      // Update this before invoking the callback because MobX can synchronously
+      // render the table again in response to the model mutation.
+      valueRef.current = nextValue;
+      onCommitRef.current(nextValue);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    window.addEventListener("blur", commit);
+    // Capture so this runs before HomePage's existing beforeunload save handler.
+    window.addEventListener("beforeunload", commit, true);
+    return () => {
+      window.removeEventListener("blur", commit);
+      window.removeEventListener("beforeunload", commit, true);
+      commit();
+    };
+  }, [commit]);
+
+  const shouldHighlight = useHasSearchMatch(draft);
   const { searchTerm } = React.useContext(SearchContext);
 
   return (
@@ -44,13 +78,17 @@ const CommentCell = (props: {
     >
       <textarea
         data-testid="contributor-comment-textarea"
-        onChange={(event) => props.onChange(event.target.value)}
-        value={props.value}
+        onBlur={commit}
+        onChange={(event) => {
+          draftRef.current = event.target.value;
+          setDraft(event.target.value);
+        }}
+        value={draft}
       />
       {/* lightweight inline highlight preview to give a stable element for tests */}
       {shouldHighlight && (
         <div data-testid="contributor-comment-inline-preview">
-          {highlightMatches(props.value, searchTerm)}
+          {highlightMatches(draft, searchTerm)}
         </div>
       )}
     </div>
@@ -116,9 +154,8 @@ class ContributorsTable extends React.Component<IProps> {
     return (
       <CommentCell
         value={cellValue as string}
-        onChange={(v: string) => {
-          this.props.file.contributions[cellInfo.index][fieldOfThisColumn] = v;
-          this.setState({}); //review: having to do this, to get an update, usually means something isn't wired right with mobx
+        onCommit={(v: string) => {
+          contribution[fieldOfThisColumn] = v as any;
         }}
       />
     );

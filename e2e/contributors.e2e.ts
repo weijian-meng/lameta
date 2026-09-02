@@ -60,20 +60,49 @@ test.describe("FileList", () => {
     await page.getByRole("option", { name: name }).click();
   });
 
-  test("contributor comments keep focus while typing", async () => {
+  test("contributor comments keep focus while typing and persist on blur", async () => {
     await project.goToSessions();
     await project.addSession();
     await project.goToContributorsOfThisSession();
 
-    const comment = "Comment 123/测试";
+    // Comments are persisted only for actual contributors, not the intentionally
+    // blank row at the bottom of the table.
+    await page.keyboard.press("Tab");
+    await page.keyboard.type("latency tester");
+    await page.keyboard.press("Enter");
+
+    const firstLine = "Comment 123/测试";
+    const comment = `${firstLine}\nSecond line 🙂`;
     const textarea = page
       .getByTestId("contributor-comment-textarea")
       .first();
 
     await textarea.click();
-    await textarea.pressSequentially(comment);
+    await textarea.pressSequentially(firstLine);
+    await textarea.press("Enter");
+    await textarea.pressSequentially("Second line 🙂");
 
     await expect(textarea).toBeFocused();
     await expect(textarea).toHaveValue(comment);
+
+    // Leaving the field commits the buffered edit to the observable model.
+    await project.goToNotesOfThisSession();
+    await project.goToContributorsOfThisSession();
+    await expect(
+      page.getByTestId("contributor-comment-textarea").first()
+    ).toHaveValue(comment);
+
+    // Leaving the top-level Sessions tab invokes the app's normal save path.
+    // Verify the committed value also survives rebuilding the model from disk.
+    await project.goToProject();
+    await lameta.softReload();
+    await project.goToSessions();
+    const searchInput = page.getByTestId("folder-search-input");
+    await searchInput.fill(firstLine);
+    await searchInput.press("Enter");
+    await project.goToContributorsOfThisSession();
+    await expect(
+      page.getByTestId("contributor-comment-textarea").first()
+    ).toHaveValue(comment);
   });
 });
