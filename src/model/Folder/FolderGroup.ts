@@ -15,13 +15,13 @@ export class FolderGroup {
   public searchResetCounter: number;
   // holds the current (last non-empty) search string so that UI components can persist it across unmounts/mounts
   public searchTerm: string;
-  // Optional provider for additional strings to index for each folder (e.g., cross-folder data like a person's contributions)
-  public getExtraIndexableStringsForFolder?: (f: Folder) => string[];
   private searchIndex?: FolderSearchTermsIndex; // lazily instantiated per FolderGroup; never a singleton
 
   public selectedIndex: number;
 
-  constructor() {
+  constructor(
+    private readonly getPersonContributionTerms?: () => Map<string, string[]>
+  ) {
     makeObservable(this, {
       items: observable,
       selectedIndex: observable,
@@ -68,18 +68,11 @@ export class FolderGroup {
       return;
     }
 
-    // Lazily build the index the first time we actually filter with a non-empty string.
-    // Review: Might this be too slow, and happen as the person is typing?
-    if (!this.searchIndex) {
-      try {
-        this.searchIndex = new FolderSearchTermsIndex(this);
-      } catch (e: any) {
-        NotifyException(e, "Building search index failed");
-        this.filteredItems = undefined;
-        return;
-      }
-    }
     try {
+      this.searchIndex ??= new FolderSearchTermsIndex(
+        this,
+        this.getPersonContributionTerms
+      );
       this.filteredItems = this.searchIndex.search(normalized);
     } catch (e: any) {
       NotifyException(e, "Search failed");

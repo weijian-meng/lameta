@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 import { Folder } from "./Folder";
 import { FolderGroup } from "./FolderGroup";
 import { FieldSet } from "../field/FieldSet";
@@ -14,6 +14,8 @@ import { SessionMetadataFile } from "../Project/Session/Session";
 import * as Path from "path";
 import { EncounteredVocabularyRegistry } from "../Project/EncounteredVocabularyRegistry";
 import { setupLanguageFinderForTests } from "../../languageFinder/LanguageFinder";
+import { Project } from "../Project/Project";
+import { Contribution } from "../file/File";
 
 class FakeFolder extends Folder {
   private _props = new FieldSet();
@@ -63,11 +65,68 @@ describe("FolderSearchTermsIndex", () => {
 
     // change a field to include search term
     f2.properties.setText("notes", "giant fox hunter");
-    // trigger a re-filter; since our current simple reaction in FolderSearchTermsIndex rebuilds
-    // synchronously on observable changes, filtering again should now see both
     g.filter("fox");
     // Both should now match; order not guaranteed
     expect(g.filteredItems!.length).toBe(2);
+  });
+
+  it("waits for the next People search to rebuild after edits", () => {
+    const directory = temp.mkdirSync("people-search");
+    try {
+      const contribution = new Contribution("ALPHA", "speaker", "field notes");
+      const getContributions = vi.fn(() => [contribution]);
+      const project = {
+        sessions: {
+          items: [
+            {
+              displayName: "Recording One",
+              getAllContributionsToAllFiles: getContributions
+            }
+          ]
+        }
+      };
+      const group = new FolderGroup(() =>
+        Project.prototype.getPersonContributionSearchTerms.call(project)
+      );
+      const registry = new EncounteredVocabularyRegistry();
+      const alpha = new FakeFolder({ title: "Alpha", notes: "" });
+      const bravo = new FakeFolder({ title: "Bravo", notes: "" });
+      for (const folder of [alpha, bravo]) {
+        Object.assign(folder, {
+          metadataFile: new PersonMetadataFile(directory, registry)
+        });
+      }
+      group.items.push(alpha, bravo);
+
+      for (const query of ["speaker", "field notes", "recording one"]) {
+        group.filter(query);
+        expect(group.filteredItems).toEqual([alpha]);
+      }
+      expect(getContributions).toHaveBeenCalledTimes(1);
+
+      group.filter("");
+      runInAction(() => {
+        alpha.properties.setText("notes", "new metadata");
+        contribution.comments = "updated transcript";
+      });
+      expect(getContributions).toHaveBeenCalledTimes(1);
+
+      for (const query of ["new metadata", "updated transcript"]) {
+        group.filter(query);
+        expect(group.filteredItems).toEqual([alpha]);
+      }
+      expect(getContributions).toHaveBeenCalledTimes(2);
+
+      runInAction(() => {
+        contribution.comments = "reviewed transcript";
+      });
+      expect(getContributions).toHaveBeenCalledTimes(2);
+      group.filter("reviewed transcript");
+      expect(group.filteredItems).toEqual([alpha]);
+      expect(getContributions).toHaveBeenCalledTimes(3);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("searches person languages case-insensitively (LAM-18 regression test)", () => {

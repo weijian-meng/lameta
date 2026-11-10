@@ -2,12 +2,11 @@ import Fuse from "fuse.js";
 import { Folder } from "./Folder";
 import { FolderGroup } from "./FolderGroup";
 import * as Path from "path";
-import { reaction } from "mobx";
+import { computed, IComputedValue } from "mobx";
 import { PersonMetadataFile } from "../Project/Person/Person";
 import { SessionMetadataFile } from "../Project/Session/Session";
 import { staticLanguageFinder } from "../../languageFinder/LanguageFinder";
 import { NotifyException } from "../../components/Notify";
-import { Project } from "../Project/Project";
 
 interface IndexedFolder {
   folder: Folder;
@@ -16,93 +15,33 @@ interface IndexedFolder {
 
 // Each FolderGroup owns one FolderSearchTermsIndex
 export class FolderSearchTermsIndex {
-  private group?: FolderGroup;
-  private index?: Fuse<IndexedFolder>;
+  private readonly index: IComputedValue<Fuse<IndexedFolder>>;
 
-  constructor(group: FolderGroup) {
-    this.group = group;
-    this.build();
-    // Rebuild index reactively when folder items or contained file lists change.
-    reaction(
-      () =>
-        this.group!.items.map((f) => {
-          // Folder-level properties signature (e.g., Session/Person fields)
-          const folderPropsSig = f.properties
-            .values()
-            .map((fld: any) =>
-              fld && typeof fld.text === "string" ? fld.text : ""
-            )
-            .join("|");
-
-          // Files signature: include file names, file metadata field texts, and contributions
-          const filesSig = (f.files || [])
-            .map((file: any) => {
-              const name =
-                file && file.pathInFolderToLinkFileOrLocalCopy
-                  ? Path.basename(file.pathInFolderToLinkFileOrLocalCopy)
-                  : "";
-              let propsText = "";
-              try {
-                if (file && file.properties && file.properties.values) {
-                  propsText = file.properties
-                    .values()
-                    .map((p: any) =>
-                      p && typeof p.text === "string" ? p.text : ""
-                    )
-                    .join("|");
-                }
-              } catch {}
-              let contribText = "";
-              try {
-                if (file && Array.isArray(file.contributions)) {
-                  contribText = file.contributions
-                    .map((c: any) =>
-                      [c?.personReference, c?.role, c?.comments]
-                        .filter(Boolean)
-                        .join("|")
-                    )
-                    .join(";");
-                }
-              } catch {}
-              return [name, propsText, contribText].join("||");
-            })
-            .join(",");
-
-          // Language-related signals for Person/Session (match makeBlob sources)
-          let languageSig = "";
-          try {
-            if (f.metadataFile instanceof PersonMetadataFile) {
-              languageSig = (f.metadataFile.languages || [])
-                .map((lng: any) => lng?.code || "")
-                .join("|");
-            } else if (f.metadataFile instanceof SessionMetadataFile) {
-              const subject = f.properties.getTextStringOrEmpty("languages");
-              const working =
-                f.properties.getTextStringOrEmpty("workingLanguages");
-              languageSig = [subject, working].join("|");
-            }
-          } catch {}
-
-          return [folderPropsSig, filesSig, languageSig].join("::");
-        }).join("\n"),
-      (sig, prev) => {
-        if (sig !== prev) {
-          this.build();
-        }
-      }
-    );
+  constructor(
+    private readonly group: FolderGroup,
+    getPersonContributionTerms?: () => Map<string, string[]>
+  ) {
+    // Keep the last index for successive searches. Metadata changes invalidate
+    // it, but MobX does not rebuild it until the next search reads it.
+    this.index = computed(() => this.build(getPersonContributionTerms?.()), {
+      keepAlive: true
+    });
   }
 
-  public build() {
-    if (!this.group) return;
-    const items: IndexedFolder[] = this.group.items.map((f) => ({
-      folder: f,
-      blob: this.makeBlob(f)
+  private build(personContributionTerms?: Map<string, string[]>) {
+    const items: IndexedFolder[] = this.group.items.map((folder) => ({
+      folder,
+      blob: this.makeBlob(
+        folder,
+        folder.metadataFile instanceof PersonMetadataFile
+          ? personContributionTerms?.get(folder.displayName.toLocaleLowerCase())
+          : undefined
+      )
     }));
     // This gives us exact matches only. "Fuzzy", while conceivably helpful,
     // is too confusing for a user that is trying to filter down to a set
     // of folders to work with.
-    this.index = new Fuse(items, {
+    return new Fuse(items, {
       keys: ["blob"],
       includeScore: false,
       threshold: 0.0,
@@ -112,14 +51,15 @@ export class FolderSearchTermsIndex {
   }
 
   public search(query: string): Folder[] {
-    if (!this.group) return [];
-    if (!this.index) this.build();
-    if (!query.trim()) return this.group.items;
-    const results = this.index!.search(query.trim());
-    return results.map((r) => r.item.folder);
+    const trimmed = query.trim();
+    if (!trimmed) return this.group.items;
+    return this.index
+      .get()
+      .search(trimmed)
+      .map((result) => result.item.folder);
   }
 
-  private makeBlob(f: Folder): string {
+  private makeBlob(f: Folder, personContributionBits: string[] = []): string {
     const fieldBits = f.properties
       .values()
       .map((field: any) =>
@@ -208,26 +148,6 @@ export class FolderSearchTermsIndex {
         addLangFromCodes(working);
       } catch (e: any) {
         NotifyException(e, "Reading working languages failed");
-      }
-    }
-
-    // If this is a Person folder, also include contribution roles/comments/session names
-    // pulled from the current Project to allow role-based person search.
-    const personContributionBits: string[] = [];
-    if (f.metadataFile instanceof PersonMetadataFile) {
-      const personId = (f as any).getIdToUseForReferences
-        ? (f as any).getIdToUseForReferences()
-        : f.displayName;
-      try {
-        const contribs = Project.getContributionsMatchingPersonStatic(personId);
-        contribs.forEach((c) => {
-          if (c.role) personContributionBits.push(c.role);
-          if (c.comments) personContributionBits.push(c.comments);
-          if ((c as any).sessionName)
-            personContributionBits.push((c as any).sessionName);
-        });
-      } catch (e: any) {
-        NotifyException(e, "Indexing person contributions failed");
       }
     }
 

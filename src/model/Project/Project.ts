@@ -94,7 +94,9 @@ export class Project extends Folder {
   // @observable
   // public persons.selected: IFolderSelection;
   public sessions: FolderGroup = new FolderGroup();
-  public persons: FolderGroup = new FolderGroup();
+  public persons: FolderGroup = new FolderGroup(() =>
+    this.getPersonContributionSearchTerms()
+  );
 
   public descriptionFolder: Folder;
   public otherDocsFolder: Folder;
@@ -1318,10 +1320,23 @@ export class Project extends Folder {
     );
   }
 
-  public static getContributionsMatchingPersonStatic(
-    personId: string
-  ): Contribution[] {
-    return sCurrentProject!.getContributionsMatchingPerson(personId);
+  public getPersonContributionSearchTerms(): Map<string, string[]> {
+    const termsByPerson = new Map<string, string[]>();
+    for (const session of this.sessions.items as Session[]) {
+      const sessionName = session.displayName;
+      for (const contribution of session.getAllContributionsToAllFiles()) {
+        const key = contribution.personReference.toLowerCase();
+        let terms = termsByPerson.get(key);
+        if (!terms) {
+          terms = [];
+          termsByPerson.set(key, terms);
+        }
+        if (contribution.role) terms.push(contribution.role);
+        if (contribution.comments) terms.push(contribution.comments);
+        if (sessionName) terms.push(sessionName);
+      }
+    }
+    return termsByPerson;
   }
 
   public getContributionsMatchingPerson(id: string): Contribution[] {
