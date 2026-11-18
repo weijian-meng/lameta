@@ -149,7 +149,7 @@ class FolderList extends React.Component<IProps, any> {
             .replace("Display Name", "Person")
         );
 
-      const c: object = {
+      return {
         id: key,
         width:
           key === "checked"
@@ -157,8 +157,28 @@ class FolderList extends React.Component<IProps, any> {
             : this.columnWidthManager.columnWidths[key],
         className: key,
         Header: header,
+        // React Table sorts accessor values. Render highlights and controls in the cell.
         accessor: (f: Folder) => {
-          // checked is a special case because it isn't actually a field on some file, just a property on the folder.
+          if (key === "checked") return f.marked;
+
+          const field = f.properties.getValueOrThrow(key);
+          if (field instanceof HasConsentField) return field.hasConsent();
+          if (field.type === FieldType.Date) return field.asISODateString();
+          if (field.type === FieldType.Function) return field.text;
+          if (field.type === FieldType.Text) {
+            return key === "title"
+              ? field.getTextForSimpleDisplay()
+              : field.toString();
+          }
+          return "ERROR";
+        },
+        Cell: ({
+          original: f,
+          value
+        }: {
+          original: Folder;
+          value: string | boolean;
+        }) => {
           if (key === "checked") {
             return (
               <input
@@ -166,7 +186,7 @@ class FolderList extends React.Component<IProps, any> {
                 // add an id that contains the folder id so that tests can choose and click the correct one
                 data-testid={`${f.propertyForCheckingId}-checkbox`}
                 title={t`Mark for Export or Deletion`}
-                checked={f.marked}
+                checked={value === true}
                 onChange={(e) => {
                   e.stopPropagation(); // don't select the folder of row
                   //(field as SelectionField).toggle();
@@ -175,52 +195,25 @@ class FolderList extends React.Component<IProps, any> {
               />
             );
           }
-          const field = f.properties.getValueOrThrow(key);
-          if (field.type === FieldType.Text) {
-            switch (key) {
-              case "status":
-                return (
-                  <img
-                    title={field.text}
-                    src={this.getStatusIcon(field.text)}
-                  />
-                );
-              case "title":
-                return highlightIfMatch(field.getTextForSimpleDisplay());
-              default:
-                return highlightIfMatch(field.toString());
-            }
+          if (key === "status") {
+            const status = String(value);
+            return <img title={status} src={this.getStatusIcon(status)} />;
           }
-          if (field.type === FieldType.Date) {
-            return highlightIfMatch(field.asISODateString());
+          if (key === "hasConsent") {
+            return (
+              <img
+                src={value ? this.hasConsentPath : this.noConsentPath}
+                title={
+                  value
+                    ? t`Found file with a name containing 'Consent'`
+                    : t`Found no file with a name containing 'Consent'`
+                }
+              />
+            );
           }
-
-          if (field instanceof HasConsentField) {
-            const consentField = field as HasConsentField;
-            if (consentField.hasConsent()) {
-              return (
-                <img
-                  src={this.hasConsentPath}
-                  title={t`Found file with a name containing 'Consent'`}
-                />
-              );
-            } else {
-              return (
-                <img
-                  src={this.noConsentPath}
-                  title={t`Found no file with a name containing 'Consent'`}
-                />
-              );
-            }
-          }
-
-          if (field.type === FieldType.Function) {
-            return highlightIfMatch(field.text);
-          }
-          return "ERROR";
+          return highlightIfMatch(String(value));
         }
       };
-      return c;
     });
 
     return (

@@ -101,6 +101,25 @@ describe("FolderGroup.filter", () => {
     );
   });
 
+  it("keeps matches in folder order when their metadata lengths differ", () => {
+    const group = new FolderGroup();
+    const older = new FakeFolder({
+      id: "20250103_09000000",
+      title: "Morning ECD session during the outdoor activities"
+    });
+    const unrelated = new FakeFolder({
+      id: "20260101_00000000",
+      title: "Interview"
+    });
+    const newer = new FakeFolder({ id: "20260704_09000000", title: "ECD" });
+    group.items.push(older, unrelated, newer);
+
+    group.filter("ecd");
+
+    expect(group.filteredItems).toEqual([older, newer]);
+    expect(group.selectedIndex).toBe(0);
+  });
+
   // LAM-116: https://linear.app/lameta/issue/LAM-116
   // When filtering with no prior selection (selectedIndex=-1), the selection should
   // be set to the first *filtered* item's index in items[], not blindly to 0.

@@ -224,6 +224,7 @@ class ContributorsTable extends React.Component<IProps> {
       <ReactTable
         className={"contributors"}
         showPagination={false}
+        pageSize={contributors.length}
         data={contributors}
         columns={columns}
         minRows={0} // don't show empty rows

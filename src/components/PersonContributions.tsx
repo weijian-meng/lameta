@@ -62,6 +62,7 @@ export const PersonContributions = observer(
           <ReactTable
             className={"personContributions"}
             showPagination={false}
+            pageSize={Math.max(1, rows.length)}
             data={rows}
             columns={columns}
             minRows={0}

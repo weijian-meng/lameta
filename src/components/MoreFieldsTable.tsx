@@ -79,6 +79,7 @@ const AdditionalFieldsTable: React.FC<IProps> = observer(({ folder }) => {
         className="moreFieldsTable field-value-border"
         noDataText=""
         showPagination={false}
+        pageSize={Math.max(1, fieldsForRows.length)}
         data={fieldsForRows}
         columns={additionalFieldTableColumns}
         minRows={1} //don't add extra blank rows

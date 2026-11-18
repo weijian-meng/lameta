@@ -44,6 +44,7 @@ export class FolderSearchTermsIndex {
     return new Fuse(items, {
       keys: ["blob"],
       includeScore: false,
+      shouldSort: false, // Filtering keeps the folder order.
       threshold: 0.0,
       ignoreLocation: true,
       minMatchCharLength: kMinimumSearchTermLength
